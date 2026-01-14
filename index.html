@@ -1,0 +1,733 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+<meta charset="UTF-8">
+<title>Ping Pong 3D Realistyczny</title>
+<style>
+body { margin:0; overflow:hidden; font-family: Arial; background:#999; }
+#score, #coins, #message, #shop {
+  position: fixed; font-family: Arial; font-size: 20px; color:white;
+  background: rgba(0,0,0,0.4); padding:6px 12px; border-radius:8px;
+}
+#score { top: 10px; left:50%; transform:translateX(-50%); font-size:24px; }
+#coins { top:10px; right:20px; }
+#message { top:50%; left:50%; transform:translate(-50%, -50%);
+           font-size:36px; color:yellow; background: rgba(0,0,0,0.6);
+           padding:20px 40px; border-radius:12px; display:none; text-align:center; }
+#shop { bottom:10px; left:50%; transform:translateX(-50%); font-size:18px; }
+#shop button { margin:0 5px; padding:6px 10px; border-radius:6px; font-size:16px; }
+/* ===== STYL SKLEPU Z PIŁKAMI ===== */
+#ballShop {
+  position: fixed;
+  bottom: 70px; /* nad zwykłym sklepem paletek */
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 18px;
+  background: rgba(0,0,0,0.4);
+  padding: 8px 12px;
+  border-radius: 8px;
+  color: white;
+}
+#ballShop button {
+  margin: 3px 5px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 16px;
+}
+#pauseOverlay, #startOverlay { position:fixed; top:0; left:0; width:100%; height:100%;
+                                background:rgba(0,0,0,0.7); display:flex; justify-content:center;
+                                align-items:center; z-index:10; color:white; }
+.menuBox { background:#222; padding:30px; border-radius:12px; text-align:center; min-width:300px; }
+.menuBox button { margin:10px; padding:8px 16px; font-size:16px; border:none; border-radius:6px; cursor:pointer; }
+</style>
+</head>
+<body>
+
+<div id="score">Ty 0 : 0 Bot</div>
+<div id="coins">Monety: 0 | EXP: 0 | Ranga: Nowicjusz</div>
+<div id="message">Wygrana!</div>
+
+<div id="shop">
+  <button onclick="buyPaddle('blue')">Kup niebieska paletke (10 monet)</button>
+  <button onclick="buyPaddle('red')">Kup czerwona paletke (10 monet)</button>
+</div>
+<!-- ===== SKLEP Z PIŁKAMI ===== -->
+<div id="ballShop">
+  <h3>Sklep z piłkami</h3>
+  <button onclick="buyBall('red',5)">Czerwona piłka (5 monet)</button>
+  <button onclick="buyBall('blue',5)">Niebieska piłka (5 monet)</button>
+  <button onclick="buyBall('green',5)">Zielona piłka (5 monet)</button>
+  <button onclick="buyBall('intel',20)">Piłka Intel (20 monet)</button>
+</div>
+
+
+<div id="pauseOverlay" style="display:none">
+  <div class="menuBox">
+    <h1>Pauza</h1>
+    <p id="pauseStats"></p>
+    <button onclick="resumeGame()">Graj dalej</button>
+    <button onclick="exitGame()">Wyjdz z gry</button>
+  </div>
+</div>
+
+<div id="startOverlay">
+  <div class="menuBox">
+    <h1>Ping Pong 3D</h1>
+    <p>Wybierz poziom trudnosci:</p>
+    <select id="startDifficulty">
+      <option value="easy">Latwy</option>
+      <option value="medium">Sredni</option>
+      <option value="hard">Trudny</option>
+      <option value="hardcore">Hardcore</option>
+    </select>
+    <p>Wybierz fizyke:</p>
+    <select id="startPhysics">
+      <option value="simple">Prosta</option>
+      <option value="medium">Srednia</option>
+      <option value="advanced">Zaawansowana</option>
+    </select>
+    <p>Antyaliasing:</p>
+    <select id="startAntialias">
+      <option value="true">Włączony</option>
+      <option value="false">Wyłączony</option>
+    </select>
+    <br>
+    <button onclick="startGame()">Graj</button>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.152.2/build/three.min.js"></script>
+<script>
+// ===== GAME STATE =====
+
+// ===== LANGUAGE AUTO DETECT =====
+const browserLang = navigator.language.toLowerCase();
+let currentLang = browserLang.startsWith("pl") ? "pl" : "en";
+
+let paused = false;
+let difficulty = 'easy';
+let physicsMode = 'simple';
+let coins = 0;
+let exp = 0;
+let rank = 'Nowicjusz';
+let playerScore = 0;
+let botScore = 0;
+const maxPoints = 10;
+
+// ===== DIFFICULTY CONFIG =====
+const DIFF = {
+  easy:    { botSpeed:0.03, error:1.5 },
+  medium:  { botSpeed:0.05, error:0.8 },
+  hard:    { botSpeed:0.08, error:0.3 },
+  hardcore:{ botSpeed:0.12, error:0.05 }
+};
+
+// ===== HUD ELEMENTS =====
+const scoreEl = document.getElementById('score');
+const coinsEl = document.getElementById('coins');
+const messageEl = document.getElementById('message');
+const pauseOverlay = document.getElementById('pauseOverlay');
+const pauseStats = document.getElementById('pauseStats');
+const startOverlay = document.getElementById('startOverlay');
+const startDifficultySelect = document.getElementById('startDifficulty');
+const startPhysicsSelect = document.getElementById('startPhysics');
+const startAntialiasSelect = document.getElementById('startAntialias');
+
+// ===== LANGUAGE STRINGS =====
+const LANG = {
+  pl: {
+    score: "Ty {p} : {b} Bot",
+    coins: "Monety: {c} | EXP: {e} | Ranga: {r}",
+    win: "Wygrales!",
+    lose: "Przegrales!"
+  },
+  en: {
+    score: "You {p} : {b} Bot",
+    coins: "Coins: {c} | EXP: {e} | Rank: {r}",
+    win: "You won!",
+    lose: "You lost!"
+  }
+};
+
+// ===== THREE.JS SCENE =====
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x999999);
+
+// Camera
+const camera = new THREE.PerspectiveCamera(75, innerWidth/innerHeight, 0.1, 1000);
+camera.position.set(0,7,25);
+camera.lookAt(0,-1,0);
+
+// Renderer
+let antialiasSetting = true; // default
+const renderer = new THREE.WebGLRenderer({ antialias:antialiasSetting });
+renderer.setSize(innerWidth, innerHeight);
+renderer.shadowMap.enabled = true;
+renderer.shadowMap.type = THREE.PCFSoftShadowMap; 
+renderer.physicallyCorrectLights = true;
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.outputEncoding = THREE.sRGBEncoding;
+document.body.appendChild(renderer.domElement);
+
+// Lights
+const ambient = new THREE.AmbientLight(0xffffff, 0.5);
+scene.add(ambient);
+const dirLight = new THREE.DirectionalLight(0xffffff, 1.2);
+dirLight.position.set(10,20,10);
+dirLight.castShadow = true;
+dirLight.shadow.mapSize.width = 2048;
+dirLight.shadow.mapSize.height = 2048;
+dirLight.shadow.camera.left = -15;
+dirLight.shadow.camera.right = 15;
+dirLight.shadow.camera.top = 15;
+dirLight.shadow.camera.bottom = -15;
+dirLight.shadow.radius = 3;
+scene.add(dirLight);
+
+// Table
+const tableWidth = 14, tableLength = 22;
+const maxX = tableWidth/2 - 1.6;
+const tableHeight = 0.6;
+
+// ===== EFEKT REALISTYCZNEGO DREWNA NA STOLE =====
+const canvas = document.createElement('canvas');
+canvas.width = 256;
+canvas.height = 256;
+const ctx = canvas.getContext('2d');
+
+// Gradient bazowy (jaśniejsze i ciemniejsze słoje)
+const gradient = ctx.createLinearGradient(0, 0, 256, 256);
+gradient.addColorStop(0, '#deb887'); // jasne drewno
+gradient.addColorStop(0.5, '#d2b48c'); // średnie
+gradient.addColorStop(1, '#8b5a2b'); // ciemne
+ctx.fillStyle = gradient;
+ctx.fillRect(0, 0, 256, 256);
+
+// Dodajemy delikatne słoje (linie wzdłużne)
+ctx.strokeStyle = 'rgba(139,69,19,0.3)';
+ctx.lineWidth = 2;
+for(let i=0; i<256; i+=4){
+  ctx.beginPath();
+  const sway = Math.sin(i/15)*4; // falisty kształt słojów
+  ctx.moveTo(0, i+sway);
+  ctx.lineTo(256, i-sway);
+  ctx.stroke();
+}
+
+// Tworzymy teksturę z canvasu
+const woodTexture = new THREE.CanvasTexture(canvas);
+woodTexture.wrapS = THREE.RepeatWrapping;
+woodTexture.wrapT = THREE.RepeatWrapping;
+woodTexture.repeat.set(2,2);
+
+// Materiał stołu z realistyczną teksturą drewna i lekkim połyskiem
+const tableMaterial = new THREE.MeshStandardMaterial({
+  map: woodTexture,
+  roughness: 0.5, // lekki połysk
+  metalness: 0.1
+});
+
+const table = new THREE.Mesh(new THREE.BoxGeometry(tableWidth, tableHeight, tableLength), tableMaterial);
+table.position.y = -2;
+table.receiveShadow = true;
+scene.add(table);
+
+// Linie na stole (biała linia środkowa i linie brzegowe)
+const lineMaterial = new THREE.MeshStandardMaterial({
+  color: 0xffffff,
+  roughness: 0.5,
+  metalness: 0
+});
+
+// Linia środkowa
+const middleLine = new THREE.Mesh(
+  new THREE.BoxGeometry(0.05, 0.01, tableLength),
+  lineMaterial
+);
+middleLine.position.set(0, table.position.y + 0.31, 0);
+scene.add(middleLine);
+
+// Linie końcowe
+const endLine1 = new THREE.Mesh(
+  new THREE.BoxGeometry(tableWidth, 0.01, 0.05),
+  lineMaterial
+);
+endLine1.position.set(0, table.position.y + 0.31, tableLength / 2 - 0.025);
+scene.add(endLine1);
+
+const endLine2 = endLine1.clone();
+endLine2.position.z = -tableLength / 2 + 0.025;
+scene.add(endLine2);
+
+// Nogi stołu
+const legMaterial = new THREE.MeshStandardMaterial({ color: 0x8B4513 });
+const legGeometry = new THREE.BoxGeometry(0.5, 3, 0.5);
+
+[
+  [-tableWidth/2 + 0.3, -3.5, -tableLength/2 + 0.3],
+  [ tableWidth/2 - 0.3, -3.5, -tableLength/2 + 0.3],
+  [-tableWidth/2 + 0.3, -3.5,  tableLength/2 - 0.3],
+  [ tableWidth/2 - 0.3, -3.5,  tableLength/2 - 0.3]
+].forEach(pos => {
+  const leg = new THREE.Mesh(legGeometry, legMaterial);
+  leg.position.set(...pos);
+  leg.castShadow = true;
+  leg.receiveShadow = true;
+  scene.add(leg);
+});
+
+// Siatka
+const netGroup = new THREE.Group();
+const netHeight = 0.5;
+for(let i=-tableWidth/2+0.1;i<tableWidth/2;i+=0.1){
+  const bar = new THREE.Mesh(new THREE.BoxGeometry(0.05, netHeight, 0.05),
+                              new THREE.MeshStandardMaterial({color:0xffffff, roughness:0.5}));
+  bar.position.set(i,-1.5 + netHeight/2,0);
+  bar.castShadow = true;
+  netGroup.add(bar);
+}
+scene.add(netGroup);
+
+// ===== TEXTURA GUMY NA PALETKACH =====
+function createRubberTextures(colorHex){
+  const size = 256;
+
+  // ===== MAPA KOLORU =====
+  const c1 = document.createElement('canvas');
+  c1.width = c1.height = size;
+  const ctx1 = c1.getContext('2d');
+
+  ctx1.fillStyle = `#${colorHex.toString(16).padStart(6,'0')}`;
+  ctx1.fillRect(0,0,size,size);
+
+  // duże, WYRAŹNE pory gumy
+  ctx1.fillStyle = 'rgba(0,0,0,0.35)';
+  for(let i=0;i<3000;i++){
+    ctx1.beginPath();
+    ctx1.arc(
+      Math.random()*size,
+      Math.random()*size,
+      Math.random()*2+1,
+      0, Math.PI*2
+    );
+    ctx1.fill();
+  }
+
+  const colorMap = new THREE.CanvasTexture(c1);
+
+  // ===== NORMAL MAPA =====
+  const c2 = document.createElement('canvas');
+  c2.width = c2.height = size;
+  const ctx2 = c2.getContext('2d');
+
+  ctx2.fillStyle = 'rgb(128,128,255)';
+  ctx2.fillRect(0,0,size,size);
+
+  ctx2.fillStyle = 'rgba(255,255,255,0.35)';
+  for(let i=0;i<3000;i++){
+    ctx2.beginPath();
+    ctx2.arc(
+      Math.random()*size,
+      Math.random()*size,
+      Math.random()*2+1,
+      0, Math.PI*2
+    );
+    ctx2.fill();
+  }
+
+  const normalMap = new THREE.CanvasTexture(c2);
+
+  return { colorMap, normalMap };
+}
+
+
+
+// Paddles
+function createPaddle3D(color){
+  const geometry = new THREE.CylinderGeometry(1.5, 1.5, 0.4, 32);
+  geometry.rotateX(Math.PI/2);
+
+  const tex = createRubberTextures(color);
+
+  const material = new THREE.MeshStandardMaterial({
+    map: tex.colorMap,
+    normalMap: tex.normalMap,
+    normalScale: new THREE.Vector2(1.5, 1.5), // 🔥 TO ROBI EFEKT
+    roughness: 0.65,
+    metalness: 0.0
+  });
+
+  const paddle = new THREE.Mesh(geometry, material);
+  paddle.castShadow = true;
+  paddle.receiveShadow = true;
+  return paddle;
+}
+
+
+
+let currentPaddleColor = 0x00ffd5;
+let player = createPaddle3D(currentPaddleColor);
+player.position.set(0,-1.3,8.5);
+scene.add(player);
+const bot = createPaddle3D(0xff4080);
+bot.position.set(0,-1.3,-7);
+scene.add(bot);
+
+// Ball
+const ballMaterial = new THREE.MeshStandardMaterial({ color:0xffffff, metalness:0.4, roughness:0.1 });
+const ball = new THREE.Mesh(new THREE.SphereGeometry(0.4,32,32), ballMaterial);
+ball.castShadow = true;
+ball.receiveShadow = true;
+scene.add(ball);
+
+// Physics
+const velocity = new THREE.Vector3();
+const spin = new THREE.Vector3();
+const ballSpin = new THREE.Vector3();
+let gravity = -0.008;
+
+// ===== DEFORMACJA PIŁKI =====
+let ballDeform = 0;        // aktualna deformacja (0–1)
+let ballDeformSpeed = 0;  // szybkość powrotu do kształtu
+
+// ===== TEXT UPDATE HELPERS =====
+function updateScoreText() {
+  scoreEl.textContent = LANG[currentLang].score
+    .replace("{p}", playerScore)
+    .replace("{b}", botScore);
+}
+
+function updateCoinsText() {
+  coinsEl.textContent = LANG[currentLang].coins
+    .replace("{c}", coins)
+    .replace("{e}", exp)
+    .replace("{r}", rank);
+}
+
+function resetBall(dirToBot){
+  ball.position.set(0,-1,0);
+  spin.set(0,0,0);
+  ballSpin.set(0,0,0);
+  if(physicsMode==='simple'){
+    velocity.set((Math.random()-0.5)*0.05,0.08,dirToBot?-0.28:0.28);
+  } else if(physicsMode==='medium'){
+    velocity.set((Math.random()-0.5)*0.07,0.12,dirToBot?-0.28:0.28);
+  } else {
+    velocity.set((Math.random()-0.5)*0.08,0.14,dirToBot?-0.28:0.28);
+  }
+}
+
+// Funkcja odbicia piłki paletką + deformacja (ADVANCED OK)
+function applyPaddleHit(ball, paddle) {
+  const offsetX = ball.position.x - paddle.position.x;
+
+  if (physicsMode === 'advanced') {
+    // ===== PODSTAWOWE ODBICIE =====
+    velocity.y = 0.16;
+    velocity.z = (paddle === player ? -0.24 : 0.24);
+    velocity.x = offsetX * 0.10;
+
+    // ===== SPIN =====
+    ballSpin.set(
+      offsetX * 0.08,
+      0,
+      (paddle === player ? -1 : 1) * 0.35
+    );
+
+    // ===== DEFORMACJA ZALEŻNA OD KĄTA =====
+    const speed = Math.max(velocity.length(), 0.0001);
+
+    // 0 = płasko, 1 = pionowo
+    const impactAngle = Math.abs(velocity.y) / speed;
+
+    // im bardziej płasko, tym większa deformacja
+    const angleFactor = 1 - impactAngle;
+
+    // siła uderzenia
+    const power = THREE.MathUtils.clamp(speed * 2.2, 0, 1);
+
+    // finalna deformacja
+    ballDeform = power * angleFactor;
+
+    // szybkość powrotu
+    ballDeformSpeed = ballDeform * 0.35;
+
+  } else {
+    // ===== SIMPLE / MEDIUM =====
+    velocity.y = 0.1;
+    velocity.z = (paddle === player ? -0.28 : 0.28);
+    velocity.x = offsetX * 0.05;
+
+    ballSpin.set(0, 0, 0);
+
+    ballDeform = 0.3;
+    ballDeformSpeed = 0.12;
+  }
+}
+
+
+// Input
+let moveLeft=false, moveRight=false;
+document.addEventListener('keydown',e=>{
+  if(e.key==='a') moveLeft=true;
+  if(e.key==='d') moveRight=true;
+  if(e.key==='Escape') togglePause();
+});
+document.addEventListener('keyup',e=>{
+  if(e.key==='a') moveLeft=false;
+  if(e.key==='d') moveRight=false;
+});
+
+// Shop
+function buyPaddle(color){
+  if(coins<10){ showMessage("Za malo monet!",1500); return; }
+  coins-=10;
+  coinsEl.textContent=`Monety: ${coins} | EXP: ${exp} | Ranga: ${rank}`;
+  scene.remove(player);
+  currentPaddleColor=color==='blue'?0x2196f3:0xf44336;
+  player=createPaddle3D(currentPaddleColor);
+  player.position.set(0,-1.3,7);
+  scene.add(player);
+}
+
+// ===== FUNKCJA KUPOWANIA PIŁKI =====
+let currentBallColor = 0xffffff; // defaultowa piłka
+
+function buyBall(color, price){
+  if(coins < price){
+    showMessage("Za malo monet!",1500);
+    return;
+  }
+  coins -= price;
+  coinsEl.textContent = `Monety: ${coins} | EXP: ${exp} | Ranga: ${rank}`;
+
+  if(color === 'red') currentBallColor = 0xff0000;
+  else if(color === 'blue') currentBallColor = 0x2196f3;
+  else if(color === 'green') currentBallColor = 0x00ff00;
+  else if(color === 'intel') currentBallColor = 0xcccccc; // szara z logiem Intel
+
+  ball.material.color.setHex(currentBallColor);
+
+  showMessage("Kupiono piłkę!", 1200);
+}
+
+// Message helper
+function showMessage(msg,time=1000){
+  messageEl.textContent=msg; messageEl.style.display="block";
+  setTimeout(()=>{messageEl.style.display="none";},time);
+}
+
+// Pause
+function togglePause(){
+  paused = !paused;
+  pauseOverlay.style.display = paused ? "flex" : "none";
+  pauseStats.textContent=`Monety: ${coins} | EXP: ${exp} | Ranga: ${rank}`;
+}
+function resumeGame(){ paused=false; pauseOverlay.style.display="none"; }
+function exitGame(){ location.reload(); }
+
+// Start game
+function startGame(){
+  difficulty = startDifficultySelect.value;
+  physicsMode = startPhysicsSelect.value;
+  antialiasSetting = startAntialiasSelect.value==='true';
+  renderer.antialias = antialiasSetting;
+  startOverlay.style.display="none";
+  playerScore=0; botScore=0;
+  scoreEl.textContent=`Ty 0 : 0 Bot`;
+  resetBall(true);
+}
+
+// Animate
+function animate(){
+  requestAnimationFrame(animate);
+  if(paused || startOverlay.style.display=="flex"){
+    renderer.render(scene,camera);
+    return;
+  }
+
+  // ===== PLAYER =====
+  if(moveLeft) player.position.x -=0.25;
+  if(moveRight) player.position.x +=0.25;
+  player.position.x = THREE.MathUtils.clamp(player.position.x,-maxX,maxX);
+
+  // ===== BOT =====
+  const diff = DIFF[difficulty];
+  let botTargetX = THREE.MathUtils.clamp(
+    ball.position.x + (Math.random()-0.5)*diff.error,
+    -maxX, maxX
+  );
+  bot.position.x += (botTargetX - bot.position.x) * diff.botSpeed;
+
+  // ===== BASIC PHYSICS (ALL MODES) =====
+  if(physicsMode==='simple'){
+    velocity.y += gravity*0.6;
+    velocity.multiplyScalar(0.997);
+  }
+  else if(physicsMode==='medium'){
+    velocity.y += gravity*0.8;
+    velocity.multiplyScalar(0.998);
+  }
+  else {
+    // ADVANCED – bez sztucznego spowalniania
+    velocity.y += gravity;
+  }
+
+  // ===== ITTF – ONLY ADVANCED =====
+  if(physicsMode === 'advanced'){
+
+    // opór powietrza (realny ping-pong)
+    const airDrag = 0.0015;
+
+    velocity.x *= (1 - airDrag * 1.2);
+    velocity.y *= (1 - airDrag * 0.25);
+    velocity.z *= (1 - airDrag * 1.6);
+
+    // Magnus Effect (ITTF)
+    const magnusStrength = 0.002;
+    const magnusForce = new THREE.Vector3(
+      ballSpin.z * velocity.y,
+      0,
+      -ballSpin.x * velocity.y
+    ).multiplyScalar(magnusStrength);
+
+    velocity.add(magnusForce);
+
+    // tłumienie spinu
+    ballSpin.multiplyScalar(0.992);
+  }
+
+  // ===== MOVE BALL =====
+  ball.position.add(velocity);
+
+// ===== DEFORMACJA PIŁKI – POWRÓT DO KSZTAŁTU =====
+if (ballDeform > 0) {
+  ballDeform -= ballDeformSpeed;
+  if (ballDeform < 0) ballDeform = 0;
+}
+
+// skala piłki (spłaszczenie)
+const squashX = 1 + ballDeform * 0.35;
+const squashY = 1 - ballDeform * 0.45;
+const squashZ = 1 + ballDeform * 0.35;
+ball.scale.set(squashX, squashY, squashZ);
+
+  // ===== LIMIT HEIGHT =====
+  if (physicsMode === 'advanced' && ball.position.y > 1.2) {
+    ball.position.y = 1.2;
+    velocity.y *= 0.2;
+  }
+
+  // ===== VISIBLE SPIN =====
+  ball.rotation.x += ballSpin.x;
+  ball.rotation.y += ballSpin.y;
+  ball.rotation.z += ballSpin.z;
+
+// ===== TABLE =====
+const tableTopY = -1.5;
+
+if (ball.position.y <= tableTopY + 0.4 && velocity.y < 0) {
+  // korekta pozycji (żeby nie wpadała w stół)
+  ball.position.y = tableTopY + 0.4;
+
+  // ===== ODBICIE W PIONIE =====
+  if (physicsMode === 'simple') {
+    velocity.y *= -0.6;
+  } else if (physicsMode === 'medium') {
+    velocity.y *= -0.7;
+  } else {
+    velocity.y *= -0.75;
+  }
+
+  // ===== ITTF: ZACHOWANIE STOŁU =====
+  if (physicsMode === 'advanced') {
+
+    // tarcie stołu
+    const tableFriction = 0.92;
+    velocity.x *= tableFriction;
+    velocity.z *= tableFriction;
+
+    // topspin / backspin (oś X spinu wpływa na Z lotu)
+    velocity.z -= ballSpin.x * 0.04;
+
+    // sidespin (oś Z spinu wpływa na X lotu)
+    velocity.x += ballSpin.z * 0.05;
+
+    // utrata spinu przy kontakcie
+    ballSpin.multiplyScalar(0.65);
+
+    // ===== MINIMALNA LOSOWOŚĆ ITTF =====
+    const chaos = 0.002; // mikro-chaos
+    velocity.x += (Math.random() - 0.5) * chaos;
+    velocity.z += (Math.random() - 0.5) * chaos * 1.2;
+  }
+}
+
+
+  // ===== WALLS =====
+  if(Math.abs(ball.position.x) > maxX) velocity.x *= -1;
+
+  // ===== PLAYER HIT =====
+  if(
+    ball.position.z > player.position.z - 0.5 &&
+    Math.abs(ball.position.x - player.position.x) < 1.8 &&
+    velocity.z > 0
+  ){
+    applyPaddleHit(ball, player);
+  }
+
+  // ===== BOT HIT =====
+  if(
+    ball.position.z < bot.position.z + 0.5 &&
+    Math.abs(ball.position.x - bot.position.x) < 1.8 &&
+    velocity.z < 0
+  ){
+    applyPaddleHit(ball, bot);
+  }
+
+  // ===== SCORE =====
+  if(Math.abs(ball.position.z) > tableLength/2){
+    if(velocity.z < 0){
+      playerScore++;
+      coins += 5;
+      exp += 10;
+      resetBall(true);
+    } else {
+      botScore++;
+      resetBall(false);
+    }
+
+    rank = exp>500?"Legenda":exp>300?"Mistrz":exp>180?"Zawodowiec":exp>80?"Amator":"Nowicjusz";
+    scoreEl.textContent = `Ty ${playerScore} : ${botScore} Bot`;
+    coinsEl.textContent = `Monety: ${coins} | EXP: ${exp} | Ranga: ${rank}`;
+
+    if(playerScore >= maxPoints){
+      showMessage("Wygrales!",2000);
+      paused = true;
+      setTimeout(()=>{
+        startOverlay.style.display="flex";
+        paused=false;
+      },2000);
+    }
+
+    if(botScore >= maxPoints){
+      showMessage("Przegrales!",2000);
+      paused = true;
+      setTimeout(()=>{
+        startOverlay.style.display="flex";
+        paused=false;
+      },2000);
+    }
+  }
+
+  renderer.render(scene,camera);
+}
+
+
+updateScoreText();
+updateCoinsText();
+
+animate();
+</script>
+</body>
+</html>
