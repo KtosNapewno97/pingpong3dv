@@ -8,3 +8,21 @@
     z-index: 9999;
     pointer-events: none;
 }
+canvas {
+    position: fixed;
+    top: 0;
+    left: 0;
+    z-index: 1;
+}
+#powered-by {
+    position: fixed;
+    top: 10px;
+    left: 10px;
+    font-size: 12px;
+    color: white;
+    font-family: monospace;
+    z-index: 10;
+    pointer-events: none;
+}
+
+
