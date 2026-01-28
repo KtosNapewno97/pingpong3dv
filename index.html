@@ -1,7 +1,6 @@
 <!DOCTYPE html>
 <html lang="pl">
 <head>
-<link rel="stylesheet" href="style.css">
 <meta charset="UTF-8">
 <title>Ping Pong 3D Realistyczny</title>
 <style>
@@ -387,9 +386,68 @@ const spin = new THREE.Vector3();
 const ballSpin = new THREE.Vector3();
 let gravity = -0.008;
 
+// ===== WILGOTNOŚĆ POWIETRZA =====
+let humidity = 0.9; 
+// 0.7 = suche powietrze (szybka piłka)
+// 1.0 = normalne
+// 1.1+ = wilgotno (wolniejsza piłka)
+
 // ===== DEFORMACJA PIŁKI =====
 let ballDeform = 0;        // aktualna deformacja (0–1)
 let ballDeformSpeed = 0;  // szybkość powrotu do kształtu
+
+// Masa piłki w kg (2.7 g)
+const ballMass = 0.0027;  // Masa piłki pingpongowej w kilogramach
+
+// Opór powietrza (stała współczynnika oporu)
+const airDragCoefficient = 0.0015;  // Minimalny opór powietrza
+
+// Siła grawitacji (po uwzględnieniu masy piłki)
+const gravityForce = ballMass * gravity;  // Siła grawitacji wpływająca na piłkę
+
+// Funkcja zmieniająca prędkość piłki z uwzględnieniem masy
+function applyAirDragAndGravity(velocity) {
+  // Oblicz prędkość piłki (całkowita prędkość)
+  const speed = velocity.length();
+
+  // Opór powietrza, który rośnie w zależności od kwadratu prędkości (bardziej realistyczne)
+  const airDrag = airDragCoefficient * speed * speed;
+
+  // Zastosowanie oporu powietrza do każdej z osi
+velocity.x *= (1 - airDrag * humidity * 1.2);
+velocity.y *= (1 - airDrag * humidity * 0.25);
+velocity.z *= (1 - airDrag * humidity * 1.6);
+
+  // Uwzględnienie siły grawitacji w przyspieszeniu piłki (m/s^2)
+  velocity.y += gravityForce;  // Grawitacja wpływa na oś Y (spadek)
+}
+
+// Zastosowanie zmodyfikowanej fizyki w animacji
+function animate() {
+  requestAnimationFrame(animate);
+
+  if (paused || startOverlay.style.display === "flex") {
+    renderer.render(scene, camera);
+    return;
+  }
+
+  // Apply air drag and gravity
+  applyAirDragAndGravity(velocity);
+
+  // ===== MOVE BALL =====
+  ball.position.add(velocity);
+
+// ===== MIKROWIBRACJE TORU =====
+if (physicsMode === 'advanced') {
+  const microChaos = 0.0006;
+  velocity.x += (Math.random() - 0.5) * microChaos;
+  velocity.z += (Math.random() - 0.5) * microChaos;
+}
+
+  // ==== Reszta animacji piłki (deformacja, granice, odbicia, itp.) ====
+
+  renderer.render(scene, camera);
+}
 
 // ===== TEXT UPDATE HELPERS =====
 function updateScoreText() {
@@ -598,6 +656,14 @@ function animate(){
     ballSpin.multiplyScalar(0.992);
   }
 
+// ===== NIEWYCENTROWANA MASA PIŁKI =====
+const wobbleStrength = 0.00045;
+
+velocity.add(
+  ballSpin.clone().multiplyScalar(wobbleStrength)
+);
+
+
   // ===== MOVE BALL =====
   ball.position.add(velocity);
 
@@ -732,4 +798,3 @@ animate();
 </script>
 </body>
 </html>
-
